@@ -14,7 +14,7 @@ void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
     snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
              info->src_addr[0], info->src_addr[1], info->src_addr[2],
              info->src_addr[3], info->src_addr[4], info->src_addr[5]);
-    int value;
+    uint8_t value = 2;
     memcpy(&value, data, sizeof(int));
     //value = 0 means stop, value = 1 means start
     if(value){
