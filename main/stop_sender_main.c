@@ -11,7 +11,9 @@
 
 // MAC address of the receiver
 uint8_t receiver_mac[6] = {0x98, 0x88, 0xE0, 0x14, 0xC1, 0xA0};
-int sent = 0;
+
+//STOP MESSAGE
+uint8_t sent = 0;
 
 void send_cb(const wifi_tx_info_t *info, esp_now_send_status_t status) {
     if (status == ESP_NOW_SEND_SUCCESS) {
@@ -44,13 +46,14 @@ void app_main(void) {
     peer.encrypt = false;
     ESP_ERROR_CHECK(esp_now_add_peer(&peer));
 
-    int i = 0;
-    while (1) {
-        // Send data
-        sent = i;
-        const uint8_t *msg = (const uint8_t *)&i;
-        ESP_ERROR_CHECK(esp_now_send(receiver_mac, (const uint8_t *)msg, sizeof(i)));
-        i++;
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
+    //send the message at startup (u can trigger the message with the RST button)
+    const uint8_t *msg = &sent;
+    ESP_ERROR_CHECK(esp_now_send(receiver_mac, (const uint8_t *)msg, sizeof(sent)));
+
+    // while (1) {
+    //     // Send data
+    //     const uint8_t *msg = &sent;
+    //     ESP_ERROR_CHECK(esp_now_send(receiver_mac, (const uint8_t *)msg, sizeof(sent)));
+    //     vTaskDelay(1000 / portTICK_PERIOD_MS);
+    // }
 }

@@ -16,7 +16,13 @@ void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
              info->src_addr[3], info->src_addr[4], info->src_addr[5]);
     int value;
     memcpy(&value, data, sizeof(int));
-    printf("Received from %s: %d\n", mac_str, value);
+    //value = 0 means stop, value = 1 means start
+    if(value){
+        printf("START\n");
+    }
+    else{
+        printf("STOP\n");
+    }
 }
 
 void app_main(void) {
