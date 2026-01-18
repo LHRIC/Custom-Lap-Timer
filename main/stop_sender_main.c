@@ -7,14 +7,15 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 
+
 #define TAG "ESP_NOW_TX"
 
 // MAC address of the receiver
-uint8_t receiver_mac[6] = {0x98, 0x88, 0xE0, 0x14, 0xC1, 0xA0};
+uint8_t receiver_mac[6] = {0x30, 0xED, 0xA0, 0xB8, 0x9B, 0xF0};
 
 //STOP MESSAGE
 uint8_t sent = 0;
-uint8_t tryAgain = 0;
+uint8_t tryAgain = 1;
 
 void send_cb(const wifi_tx_info_t *info, esp_now_send_status_t status) {
     if (status == ESP_NOW_SEND_SUCCESS) {
@@ -52,13 +53,7 @@ void app_main(void) {
     //send the message at startup (u can trigger the message with the RST button)
     const uint8_t *msg = &sent;
     while(tryAgain){
-    ESP_ERROR_CHECK(esp_now_send(receiver_mac, (const uint8_t *)msg, sizeof(sent)));
+        ESP_ERROR_CHECK(esp_now_send(receiver_mac, (const uint8_t *)msg, sizeof(sent)));
+        vTaskDelay(100 / portTICK_PERIOD_MS);
     }
-
-    // while (1) {
-    //     // Send data
-    //     const uint8_t *msg = &sent;
-    //     ESP_ERROR_CHECK(esp_now_send(receiver_mac, (const uint8_t *)msg, sizeof(sent)));
-    //     vTaskDelay(1000 / portTICK_PERIOD_MS);
-    // }
 }
