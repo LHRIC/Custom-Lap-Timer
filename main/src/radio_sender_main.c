@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "minmea.h"
 
 #define TXD_PIN 17
 #define RXD_PIN 18
