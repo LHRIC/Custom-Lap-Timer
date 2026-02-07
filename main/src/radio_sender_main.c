@@ -116,8 +116,6 @@ void app_main(void)
             {
                 gps_buffer[read_size] = '\0';
                 ESP_LOGI("I2C", "Read %d bytes from GPS", read_size);
-                int n = uart_write_bytes(UART_PORT, gps_buffer, read_size);
-                ESP_LOGI("UART", "Sent %d bytes over UART", n);
 
                 char *line = strtok((char *)gps_buffer, "\n");
                 while (line != NULL)
@@ -134,6 +132,12 @@ void app_main(void)
                             {
                                 ESP_LOGI("GPS", "LAT: %f, LON: %f, SPEED: %f",
                                          latitude, longitude, minmea_tofloat(&frame.speed));
+
+                                char tx_buffer[64];
+                                int len = sprintf(tx_buffer, "%f,%f\n", latitude, longitude);
+
+                                int n = uart_write_bytes(UART_PORT, tx_buffer, len);
+                                ESP_LOGI("UART", "Sent %d bytes: %s", n, tx_buffer);
                             }
                             else
                             {
