@@ -23,6 +23,10 @@ class ESP32TimerApp:
         self.read_thread = None
         self.running = True
         
+        # Toggle mode variables
+        self.toggle_mode = True
+        self.toggle_state = True  # first hit will be start timer
+        
         self.setup_ui()
         self.update_timer_display()
         
@@ -97,6 +101,37 @@ class ESP32TimerApp:
             cursor="hand2"
         )
         self.connect_btn.pack(side=tk.TOP, pady=5)
+        
+        # Toggle Mode Control
+        toggle_frame = tk.Frame(main_frame, bg="#0f172a", relief=tk.RIDGE, bd=2)
+        toggle_frame.pack(fill=tk.X, pady=(0, 20), ipady=10)
+        
+        toggle_label_frame = tk.Frame(toggle_frame, bg="#0f172a")
+        toggle_label_frame.pack(pady=5)
+        
+        tk.Label(
+            toggle_label_frame,
+            text="Toggle Mode:",
+            font=("Arial", 12, "bold"),
+            fg="#94a3b8",
+            bg="#0f172a"
+        ).pack(side=tk.LEFT, padx=10)
+        
+        self.toggle_mode_var = tk.BooleanVar(value=True)
+        self.toggle_checkbox = tk.Checkbutton(
+            toggle_label_frame,
+            text="",
+            variable=self.toggle_mode_var,
+            command=self.update_toggle_mode,
+            font=("Arial", 11),
+            fg="#a78bfa",
+            bg="#0f172a",
+            selectcolor="#1e293b",
+            activebackground="#0f172a",
+            activeforeground="#a78bfa",
+            cursor="hand2"
+        )
+        self.toggle_checkbox.pack(side=tk.LEFT)
         
         # Timer display
         timer_frame = tk.Frame(main_frame, bg="#0f172a", relief=tk.RIDGE, bd=2)
@@ -186,9 +221,9 @@ class ESP32TimerApp:
         info_frame.pack(fill=tk.X, pady=10)
         
         info_text = """ESP32 Commands:
-• Send "START" to start the timer
-• Send "STOP" to pause the timer
-• Send "RESET" to reset the timer
+• Toggle Mode ON: Send "START" or "STOP" to toggle timer
+• Toggle Mode OFF: Send "START" to start, "STOP" to pause
+• Send "RESET" to reset the timer (both modes)
 • Baud rate: 115200"""
         
         tk.Label(
@@ -206,6 +241,12 @@ class ESP32TimerApp:
         self.port_combo['values'] = port_list
         if port_list:
             self.port_combo.current(0)
+    
+    def update_toggle_mode(self):
+        self.toggle_mode = self.toggle_mode_var.get()
+        self.toggle_state = True  # Reset toggle state when mode changes
+        mode_str = "enabled" if self.toggle_mode else "disabled"
+        self.log_serial(f"Toggle mode {mode_str}")
     
     def toggle_connection(self):
         if self.is_connected:
@@ -253,15 +294,23 @@ class ESP32TimerApp:
                 self.log_serial(f"Read error: {str(e)}")
                 break
             time.sleep(0.01)
-    
+
     def process_command(self, cmd):
         cmd = cmd.upper().strip()
-        if cmd == "START":
-            self.root.after(0, self.start_timer)
-        elif cmd == "STOP":
-            self.root.after(0, self.pause_timer)
-        elif cmd == "RESET":
-            self.root.after(0, self.reset_timer)
+        if self.toggle_mode:
+            if cmd == "START" or cmd == "STOP":
+                if self.toggle_state:
+                    self.root.after(0, self.start_timer)
+                else:
+                    self.root.after(0, self.pause_timer)
+                self.toggle_state = not self.toggle_state
+        else:
+            if cmd == "START":
+                self.root.after(0, self.start_timer)
+            elif cmd == "STOP":
+                self.root.after(0, self.pause_timer)
+            elif cmd == "RESET":
+                self.root.after(0, self.reset_timer)
     
     def log_serial(self, message):
         self.serial_text.insert(tk.END, message + "\n")

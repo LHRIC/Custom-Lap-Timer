@@ -58,6 +58,7 @@ __pycache__/
 dist/
 
 # Virtual environment folders
+myvenv/
 venv/
 .venv/
 env/
