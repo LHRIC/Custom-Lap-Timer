@@ -22,15 +22,15 @@
 #define UART_PORT UART_NUM_1
 #define RX_BUF_SIZE 1024
 
-void init_i2c(void) {
+void init_i2c(void)
+{
     i2c_config_t i2c_config = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = SDA_PIN,
         .scl_io_num = SCL_PIN,
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 400000
-    };
+        .master.clk_speed = 400000};
 
     i2c_param_config(I2C_PORT, &i2c_config);
 
@@ -55,8 +55,10 @@ void init_xbee_uart(void)
     uart_driver_install(UART_PORT, RX_BUF_SIZE * 2, 0, 0, NULL, 0);
 }
 
-esp_err_t i2c_read(uint8_t addr, uint8_t reg, uint8_t* data, size_t size) {
-    if (size == 0) return ESP_OK;
+esp_err_t i2c_read(uint8_t addr, uint8_t reg, uint8_t *data, size_t size)
+{
+    if (size == 0)
+        return ESP_OK;
 
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     i2c_master_start(cmd);
@@ -65,7 +67,8 @@ esp_err_t i2c_read(uint8_t addr, uint8_t reg, uint8_t* data, size_t size) {
 
     i2c_master_start(cmd);
     i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_READ, true);
-    if (size > 1) {
+    if (size > 1)
+    {
         i2c_master_read(cmd, data, size - 1, I2C_MASTER_ACK);
     }
 
@@ -91,35 +94,66 @@ void app_main(void)
     while (1)
     {
 
-        uint8_t gps_buffer[256];
+        uint8_t gps_buffer[257];
         memset(gps_buffer, 0, sizeof(gps_buffer));
 
         uint8_t length[2];
         uint16_t bytes_available = 0;
 
-        if (i2c_read(GPS_ADDR, I2C_BYTES_AVAILABLE_HIGH, length, 2) == ESP_OK) {
+        if (i2c_read(GPS_ADDR, I2C_BYTES_AVAILABLE_HIGH, length, 2) == ESP_OK)
+        {
             bytes_available = (length[0] << 8) | length[1];
         }
 
-        if (bytes_available > 0) {
+        if (bytes_available > 0)
+        {
 
             uint16_t read_size = (bytes_available > 256) ? 256 : bytes_available;
 
             esp_err_t err = i2c_read(GPS_ADDR, I2C_DATA_STREAM, gps_buffer, read_size);
 
-            if (err == ESP_OK) {
+            if (err == ESP_OK)
+            {
+                gps_buffer[read_size] = '\0';
                 ESP_LOGI("I2C", "Read %d bytes from GPS", read_size);
-
                 int n = uart_write_bytes(UART_PORT, gps_buffer, read_size);
                 ESP_LOGI("UART", "Sent %d bytes over UART", n);
+
+                char *line = strtok((char *)gps_buffer, "\n");
+                while (line != NULL)
+                {
+                    if (minmea_sentence_id(line, true) == MINMEA_SENTENCE_RMC)
+                    {
+                        struct minmea_sentence_rmc frame;
+                        if (minmea_parse_rmc(&frame, line))
+                        {
+                            float latitude = minmea_tocoord(&frame.latitude);
+                            float longitude = minmea_tocoord(&frame.longitude);
+
+                            if (frame.valid)
+                            {
+                                ESP_LOGI("GPS", "LAT: %f, LON: %f, SPEED: %f",
+                                         latitude, longitude, minmea_tofloat(&frame.speed));
+                            }
+                            else
+                            {
+                                ESP_LOGW("GPS", "Waiting for satellite lock");
+                            }
+                        }
+                    }
+                    line = strtok(NULL, "\n");
+                }
             }
-            else {
+            else
+            {
                 ESP_LOGE("I2C", "Read Failed: %s", esp_err_to_name(err));
             }
-        } else {
+        }
+        else
+        {
             ESP_LOGD("I2C", "No data available");
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
