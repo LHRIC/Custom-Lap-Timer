@@ -1,362 +1,262 @@
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk, scrolledtext, messagebox
 import serial
 import serial.tools.list_ports
 import threading
 import time
+import math
 
-class ESP32TimerApp:
+class ESP32LapTimerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("ESP32 Timer")
-        self.root.geometry("600x700")
+        self.root.title("ESP32 Lap Timer (Single Button Arm)")
+        self.root.geometry("600x850")
         self.root.configure(bg="#1e293b")
         
-        # Timer variables
-        self.time_ms = 0
-        self.is_running = False
-        self.timer_thread = None
+        # GPS Data
+        self.current_lat = 0.0
+        self.current_lon = 0.0
+        self.has_gps_fix = False
         
-        # Serial variables
+        # Trigger Zones
+        self.start_line_lat = None
+        self.start_line_lon = None
+        self.finish_line_lat = None
+        self.finish_line_lon = None
+        
+        # Logic Flags
+        self.is_armed = False        # The "Safety Switch"
+        self.is_running = False
+        self.trigger_radius = 15.0   # Meters
+        self.start_time = 0
+        self.cooldown_ts = 0         # Prevents double-triggering
+        
+        # Serial
         self.serial_port = None
         self.is_connected = False
-        self.read_thread = None
-        self.running = True
+        self.reading_thread = True 
         
         # Toggle mode variables
         self.toggle_mode = True
         self.toggle_state = True  # first hit will be start timer
         
         self.setup_ui()
-        self.update_timer_display()
+        self.update_timer_loop()
         
     def setup_ui(self):
-        # Main container
-        main_frame = tk.Frame(self.root, bg="#1e293b")
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        # --- Header ---
+        header = tk.Frame(self.root, bg="#1e293b")
+        header.pack(fill=tk.X, padx=20, pady=20)
         
-        # Header
-        header_frame = tk.Frame(main_frame, bg="#1e293b")
-        header_frame.pack(fill=tk.X, pady=(0, 20))
+        tk.Label(header, text="LAP TIMER", font=("Arial", 28, "bold"), fg="white", bg="#1e293b").pack(side=tk.LEFT)
         
-        title_label = tk.Label(
-            header_frame,
-            text="⏰ ESP32 Timer",
-            font=("Arial", 24, "bold"),
-            fg="#a78bfa",
-            bg="#1e293b"
-        )
-        title_label.pack(side=tk.LEFT)
+        # Connection Status
+        self.status_lbl = tk.Label(header, text="Disconnected", font=("Arial", 10), fg="#ef4444", bg="#1e293b")
+        self.status_lbl.pack(side=tk.RIGHT)
+
+        # --- Connection Controls ---
+        conn_frame = tk.Frame(self.root, bg="#1e293b")
+        conn_frame.pack(fill=tk.X, padx=20)
         
-        # Connection frame
-        conn_frame = tk.Frame(header_frame, bg="#1e293b")
-        conn_frame.pack(side=tk.RIGHT)
-        
-        self.status_label = tk.Label(
-            conn_frame,
-            text="● Disconnected",
-            font=("Arial", 12),
-            fg="#64748b",
-            bg="#1e293b"
-        )
-        self.status_label.pack(side=tk.TOP)
-        
-        # COM Port selection
-        port_frame = tk.Frame(conn_frame, bg="#1e293b")
-        port_frame.pack(side=tk.TOP, pady=5)
-        
-        tk.Label(port_frame, text="Port:", fg="white", bg="#1e293b").pack(side=tk.LEFT, padx=5)
-        
-        self.port_var = tk.StringVar()
-        self.port_combo = ttk.Combobox(
-            port_frame,
-            textvariable=self.port_var,
-            width=12,
-            state="readonly"
-        )
+        self.port_combo = ttk.Combobox(conn_frame, width=20, state="readonly")
         self.port_combo.pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(conn_frame, text="🔄", command=self.refresh_ports, bg="#475569", fg="white", relief=tk.FLAT).pack(side=tk.LEFT, padx=2)
+        
+        self.connect_btn = tk.Button(conn_frame, text="Connect", command=self.toggle_connection, bg="#3b82f6", fg="black", font=("Arial", 10, "bold"))
+        self.connect_btn.pack(side=tk.LEFT, padx=10)
         self.refresh_ports()
+
+        # --- Main Timer Display ---
+        timer_box = tk.Frame(self.root, bg="#0f172a", bd=2, relief=tk.RIDGE)
+        timer_box.pack(fill=tk.X, padx=20, pady=20, ipady=15)
         
-        refresh_btn = tk.Button(
-            port_frame,
-            text="🔄",
-            command=self.refresh_ports,
-            bg="#475569",
-            fg="white",
-            relief=tk.FLAT,
-            padx=5
-        )
-        refresh_btn.pack(side=tk.LEFT)
-        
-        self.connect_btn = tk.Button(
-            conn_frame,
-            text="Connect",
-            command=self.toggle_connection,
-            bg="#7e22ce",
-            fg="white",
-            font=("Arial", 12, "bold"),
-            relief=tk.FLAT,
-            padx=20,
-            pady=5,
-            cursor="hand2"
-        )
-        self.connect_btn.pack(side=tk.TOP, pady=5)
-        
-        # Toggle Mode Control
-        toggle_frame = tk.Frame(main_frame, bg="#0f172a", relief=tk.RIDGE, bd=2)
-        toggle_frame.pack(fill=tk.X, pady=(0, 20), ipady=10)
-        
-        toggle_label_frame = tk.Frame(toggle_frame, bg="#0f172a")
-        toggle_label_frame.pack(pady=5)
-        
-        tk.Label(
-            toggle_label_frame,
-            text="Toggle Mode:",
-            font=("Arial", 12, "bold"),
-            fg="#94a3b8",
-            bg="#0f172a"
-        ).pack(side=tk.LEFT, padx=10)
-        
-        self.toggle_mode_var = tk.BooleanVar(value=True)
-        self.toggle_checkbox = tk.Checkbutton(
-            toggle_label_frame,
-            text="",
-            variable=self.toggle_mode_var,
-            command=self.update_toggle_mode,
-            font=("Arial", 11),
-            fg="#a78bfa",
-            bg="#0f172a",
-            selectcolor="#1e293b",
-            activebackground="#0f172a",
-            activeforeground="#a78bfa",
-            cursor="hand2"
-        )
-        self.toggle_checkbox.pack(side=tk.LEFT)
-        
-        # Timer display
-        timer_frame = tk.Frame(main_frame, bg="#0f172a", relief=tk.RIDGE, bd=2)
-        timer_frame.pack(fill=tk.X, pady=20, ipady=40)
-        
-        self.timer_label = tk.Label(
-            timer_frame,
-            text="00:00.00",
-            font=("Courier New", 60, "bold"),
-            fg="#a78bfa",
-            bg="#0f172a"
-        )
+        self.timer_label = tk.Label(timer_box, text="00:00.00", font=("Courier New", 75, "bold"), fg="#94a3b8", bg="#0f172a")
         self.timer_label.pack()
         
-        # Control buttons
-        controls_frame = tk.Frame(main_frame, bg="#1e293b")
-        controls_frame.pack(fill=tk.X, pady=20)
+        self.state_label = tk.Label(timer_box, text="SYSTEM IDLE", font=("Arial", 16, "bold"), fg="#64748b", bg="#0f172a")
+        self.state_label.pack()
+
+        # --- The Big ARM Button ---
+        self.arm_btn = tk.Button(self.root, text="ARM SYSTEM\n(Click to Ready)", command=self.toggle_arm, 
+                                 bg="#334155", fg="black", font=("Arial", 16, "bold"), height=3, state=tk.DISABLED)
+        self.arm_btn.pack(fill=tk.X, padx=20, pady=10)
+
+        # --- Setup Section ---
+        setup_frame = tk.LabelFrame(self.root, text="Track Setup", bg="#1e293b", fg="white", padx=10, pady=10)
+        setup_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        self.start_btn = tk.Button(
-            controls_frame,
-            text="▶ Start",
-            command=self.start_timer,
-            bg="#16a34a",
-            fg="white",
-            font=("Arial", 14, "bold"),
-            relief=tk.FLAT,
-            padx=20,
-            pady=15,
-            cursor="hand2"
-        )
-        self.start_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        # GPS Live View
+        self.gps_label = tk.Label(setup_frame, text="Current GPS: Waiting...", font=("Courier New", 12), fg="#fbbf24", bg="#1e293b")
+        self.gps_label.pack(anchor=tk.W)
+
+        # Set Buttons
+        btn_row = tk.Frame(setup_frame, bg="#1e293b")
+        btn_row.pack(fill=tk.X, pady=10)
         
-        self.pause_btn = tk.Button(
-            controls_frame,
-            text="⏸ Pause",
-            command=self.pause_timer,
-            bg="#ca8a04",
-            fg="white",
-            font=("Arial", 14, "bold"),
-            relief=tk.FLAT,
-            padx=20,
-            pady=15,
-            cursor="hand2",
-            state=tk.DISABLED
-        )
-        self.pause_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        
-        self.reset_btn = tk.Button(
-            controls_frame,
-            text="↺ Reset",
-            command=self.reset_timer,
-            bg="#dc2626",
-            fg="white",
-            font=("Arial", 14, "bold"),
-            relief=tk.FLAT,
-            padx=20,
-            pady=15,
-            cursor="hand2"
-        )
-        self.reset_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        
-        # Serial data display
-        serial_frame = tk.Frame(main_frame, bg="#0f172a", relief=tk.RIDGE, bd=2)
-        serial_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-        
-        tk.Label(
-            serial_frame,
-            text="Serial Data:",
-            font=("Arial", 12, "bold"),
-            fg="#94a3b8",
-            bg="#0f172a"
-        ).pack(anchor=tk.W, padx=10, pady=(10, 5))
-        
-        self.serial_text = scrolledtext.ScrolledText(
-            serial_frame,
-            height=8,
-            font=("Courier New", 10),
-            bg="#0f172a",
-            fg="#4ade80",
-            relief=tk.FLAT,
-            wrap=tk.WORD
-        )
-        self.serial_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-        
-        # Instructions
-        info_frame = tk.Frame(main_frame, bg="#0f172a", relief=tk.RIDGE, bd=2)
-        info_frame.pack(fill=tk.X, pady=10)
-        
-        info_text = """ESP32 Commands:
-• Toggle Mode ON: Send "START" or "STOP" to toggle timer
-• Toggle Mode OFF: Send "START" to start, "STOP" to pause
-• Send "RESET" to reset the timer (both modes)
-• Baud rate: 115200"""
-        
-        tk.Label(
-            info_frame,
-            text=info_text,
-            font=("Arial", 10),
-            fg="#94a3b8",
-            bg="#0f172a",
-            justify=tk.LEFT
-        ).pack(anchor=tk.W, padx=15, pady=15)
-    
+        tk.Button(btn_row, text="📍 Set START Line", command=self.set_start, bg="#16a34a", fg="black", width=15).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_row, text="🏁 Set FINISH Line", command=self.set_finish, bg="#dc2626", fg="black", width=15).pack(side=tk.RIGHT, padx=5)
+
+        self.start_lbl = tk.Label(setup_frame, text="Start: Not Set", fg="#64748b", bg="#1e293b")
+        self.start_lbl.pack(anchor=tk.W)
+        self.finish_lbl = tk.Label(setup_frame, text="Finish: Not Set", fg="#64748b", bg="#1e293b")
+        self.finish_lbl.pack(anchor=tk.W)
+
+        # Reset
+        tk.Button(self.root, text="RESET TIMER", command=self.reset_timer, bg="#dc2626", fg="black", width=20).pack(pady=20)
+
+    # --- Logic ---
+
     def refresh_ports(self):
-        ports = serial.tools.list_ports.comports()
-        port_list = [port.device for port in ports]
-        self.port_combo['values'] = port_list
-        if port_list:
-            self.port_combo.current(0)
-    
-    def update_toggle_mode(self):
-        self.toggle_mode = self.toggle_mode_var.get()
-        self.toggle_state = True  # Reset toggle state when mode changes
-        mode_str = "enabled" if self.toggle_mode else "disabled"
-        self.log_serial(f"Toggle mode {mode_str}")
-    
+        self.port_combo['values'] = [p.device for p in serial.tools.list_ports.comports()]
+        if self.port_combo['values']: self.port_combo.current(0)
+
     def toggle_connection(self):
-        if self.is_connected:
-            self.disconnect()
-        else:
-            self.connect()
-    
+        if self.is_connected: self.disconnect()
+        else: self.connect()
+
     def connect(self):
-        port_name = self.port_var.get()
-        if not port_name:
-            self.log_serial("No port selected!")
-            return
-        
         try:
-            self.serial_port = serial.Serial(port_name, 115200, timeout=1)
+            self.serial_port = serial.Serial(self.port_combo.get(), 9600, timeout=1)
             self.is_connected = True
-            self.status_label.config(text="● Connected", fg="#4ade80")
+            self.status_lbl.config(text="Connected", fg="#4ade80")
             self.connect_btn.config(text="Disconnect", bg="#dc2626")
-            self.log_serial(f"Connected to {port_name}")
-            
-            # Start reading thread
-            self.read_thread = threading.Thread(target=self.read_serial, daemon=True)
-            self.read_thread.start()
+            threading.Thread(target=self.read_loop, daemon=True).start()
         except Exception as e:
-            self.log_serial(f"Connection failed: {str(e)}")
-    
+            messagebox.showerror("Error", str(e))
+
     def disconnect(self):
         self.is_connected = False
-        if self.serial_port:
-            self.serial_port.close()
-            self.serial_port = None
-        self.status_label.config(text="● Disconnected", fg="#64748b")
-        self.connect_btn.config(text="Connect", bg="#7e22ce")
-        self.log_serial("Disconnected")
-    
-    def read_serial(self):
-        while self.is_connected and self.running:
+        if self.serial_port: self.serial_port.close()
+        self.status_lbl.config(text="Disconnected", fg="#ef4444")
+        self.connect_btn.config(text="Connect", bg="#3b82f6")
+
+    def read_loop(self):
+        while self.is_connected and self.reading_thread:
             try:
-                if self.serial_port and self.serial_port.in_waiting:
-                    data = self.serial_port.readline().decode('utf-8', errors='ignore').strip()
-                    if data:
-                        self.log_serial(f"Received: {data}")
-                        self.process_command(data)
-            except Exception as e:
-                self.log_serial(f"Read error: {str(e)}")
-                break
+                if self.serial_port.in_waiting:
+                    line = self.serial_port.readline().decode('utf-8', errors='ignore').strip()
+                    if line: self.process_data(line)
+            except: break
             time.sleep(0.01)
 
-    def process_command(self, cmd):
-        cmd = cmd.upper().strip()
-        if self.toggle_mode:
-            if cmd == "START" or cmd == "STOP":
-                if self.toggle_state:
-                    self.root.after(0, self.start_timer)
-                else:
-                    self.root.after(0, self.pause_timer)
-                self.toggle_state = not self.toggle_state
+    def process_data(self, line):
+        try:
+            # Expected format: "30.123456,-97.123456"
+            parts = line.split(',')
+            if len(parts) == 2:
+                lat = float(parts[0])
+                lon = float(parts[1])
+                
+                self.current_lat = lat
+                self.current_lon = lon
+                self.has_gps_fix = True
+                
+                # Update UI
+                self.root.after(0, lambda: self.gps_label.config(text=f"Current GPS: {lat:.6f}, {lon:.6f}"))
+                self.check_zones()
+        except ValueError: pass
+
+    def toggle_arm(self):
+        # The Master Switch Logic
+        if self.is_armed:
+            # DISARM
+            self.is_armed = False
+            self.arm_btn.config(text="ARM SYSTEM\n(Click to Ready)", bg="#334155", fg="black")
+            self.state_label.config(text="SYSTEM PAUSED", fg="#facc15")
         else:
-            if cmd == "START":
-                self.root.after(0, self.start_timer)
-            elif cmd == "STOP":
-                self.root.after(0, self.pause_timer)
-            elif cmd == "RESET":
-                self.root.after(0, self.reset_timer)
-    
-    def log_serial(self, message):
-        self.serial_text.insert(tk.END, message + "\n")
-        self.serial_text.see(tk.END)
-    
-    def start_timer(self):
+            # ARM
+            if not self.start_line_lat or not self.finish_line_lat:
+                messagebox.showwarning("Setup Error", "You must set Start and Finish lines first")
+                return
+            
+            self.is_armed = True
+            self.arm_btn.config(text="SYSTEM ARMED\n(Crossing lines will trigger timer)", bg="#ef4444", fg="black")
+            
+            if self.is_running:
+                self.state_label.config(text="LOOKING FOR FINISH...", fg="#ef4444")
+            else:
+                self.state_label.config(text="LOOKING FOR START...", fg="#4ade80")
+
+    def check_zones(self):
+        # 1. Global Safety Check: If not armed, ignore everything
+        if not self.is_armed: return
+        
+        # 2. Cooldown Check (Don't trigger twice in 5 seconds)
+        if time.time() - self.cooldown_ts < 5: return
+
+        # 3. Check Start Line (Only if timer is stopped)
         if not self.is_running:
-            self.is_running = True
-            self.start_btn.config(state=tk.DISABLED)
-            self.pause_btn.config(state=tk.NORMAL)
-            self.timer_thread = threading.Thread(target=self.run_timer, daemon=True)
-            self.timer_thread.start()
-    
-    def pause_timer(self):
+            dist = self.haversine(self.current_lat, self.current_lon, self.start_line_lat, self.start_line_lon)
+            if dist <= self.trigger_radius:
+                self.start_timer()
+
+        # 4. Check Finish Line (Only if timer is running)
+        else:
+            dist = self.haversine(self.current_lat, self.current_lon, self.finish_line_lat, self.finish_line_lon)
+            if dist <= self.trigger_radius:
+                self.stop_timer()
+
+    def start_timer(self):
+        self.is_running = True
+        self.start_time = time.time()
+        self.cooldown_ts = time.time()
+        
+        self.root.after(0, lambda: self.timer_label.config(fg="#4ade80")) # Green
+        self.root.after(0, lambda: self.state_label.config(text="LAP STARTED", fg="#4ade80"))
+        # Note: We stay ARMED so we can catch the finish line
+
+    def stop_timer(self):
         self.is_running = False
-        self.start_btn.config(state=tk.NORMAL)
-        self.pause_btn.config(state=tk.DISABLED)
-    
+        self.is_armed = False # AUTO DISARM for safety
+        
+        self.root.after(0, lambda: self.timer_label.config(fg="#fbbf24")) # Gold
+        self.root.after(0, lambda: self.state_label.config(text="LAP FINISHED (Disarmed)", fg="#fbbf24"))
+        self.root.after(0, lambda: self.arm_btn.config(text="ARM SYSTEM\n(Click to Ready)", bg="#334155", fg="black"))
+
     def reset_timer(self):
         self.is_running = False
-        self.time_ms = 0
-        self.start_btn.config(state=tk.NORMAL)
-        self.pause_btn.config(state=tk.DISABLED)
-        self.update_timer_display()
-    
-    def run_timer(self):
-        while self.is_running:
-            time.sleep(0.01)
-            self.time_ms += 10
-            self.root.after(0, self.update_timer_display)
-    
-    def update_timer_display(self):
-        minutes = self.time_ms // 60000
-        seconds = (self.time_ms % 60000) // 1000
-        centiseconds = (self.time_ms % 1000) // 10
-        time_str = f"{minutes:02d}:{seconds:02d}.{centiseconds:02d}"
-        self.timer_label.config(text=time_str)
-    
-    def on_closing(self):
-        self.running = False
-        if self.is_connected:
-            self.disconnect()
-        self.root.destroy()
+        self.is_armed = False
+        self.timer_label.config(text="00:00.00", fg="#94a3b8")
+        self.state_label.config(text="IDLE", fg="#64748b")
+        self.arm_btn.config(text="ARM SYSTEM\n(Click to Ready)", bg="#334155", fg="black")
+        
+        # Re-enable button if we have coords
+        if self.start_line_lat and self.finish_line_lat:
+             self.arm_btn.config(state=tk.NORMAL)
+
+    def set_start(self):
+        if self.has_gps_fix:
+            self.start_line_lat = self.current_lat
+            self.start_line_lon = self.current_lon
+            self.start_lbl.config(text=f"Start: {self.current_lat:.5f}, {self.current_lon:.5f}", fg="#4ade80")
+            if self.finish_line_lat: self.arm_btn.config(state=tk.NORMAL)
+
+    def set_finish(self):
+        if self.has_gps_fix:
+            self.finish_line_lat = self.current_lat
+            self.finish_line_lon = self.current_lon
+            self.finish_lbl.config(text=f"Finish: {self.current_lat:.5f}, {self.current_lon:.5f}", fg="#ef4444")
+            if self.start_line_lat: self.arm_btn.config(state=tk.NORMAL)
+
+    def update_timer_loop(self):
+        if self.is_running:
+            diff = time.time() - self.start_time
+            m = int(diff // 60)
+            s = int(diff % 60)
+            c = int((diff * 100) % 100)
+            self.timer_label.config(text=f"{m:02d}:{s:02d}.{c:02d}")
+        self.root.after(30, self.update_timer_loop)
+
+    def haversine(self, lat1, lon1, lat2, lon2):
+        R = 6371000
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        return R * c
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = ESP32TimerApp(root)
-    root.protocol("WM_DELETE_WINDOW", app.on_closing)
+    app = ESP32LapTimerApp(root)
     root.mainloop()
