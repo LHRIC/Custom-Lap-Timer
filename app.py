@@ -25,6 +25,12 @@ class ESP32LapTimerApp:
         self.daq_has_gps_fix = False
         
         # Trigger Zones
+
+        # Values in garage
+        # self.start_line_lat = 30.29031
+        # self.start_line_lon = -97.73525
+        # self.finish_line_lat = 30.290224
+        # self.finish_line_lon = -97.735301
         self.start_line_lat = None
         self.start_line_lon = None
         self.finish_line_lat = None
@@ -33,7 +39,7 @@ class ESP32LapTimerApp:
         # Logic Flags
         self.is_armed = False        # The "Safety Switch"
         self.is_running = False
-        self.trigger_radius = 15.0   # Meters
+        self.trigger_radius = 10.0   # Meters
         self.start_time = 0
         self.cooldown_ts = 0         # Prevents double-triggering
         
@@ -127,7 +133,7 @@ class ESP32LapTimerApp:
 
     def connect(self):
         try:
-            self.serial_port = serial.Serial(self.port_combo.get(), 9600, timeout=1)
+            self.serial_port = serial.Serial(self.port_combo.get(), 115200, timeout=1)
             self.is_connected = True
             self.status_lbl.config(text="Connected", fg="#4ade80")
             self.connect_btn.config(text="Disconnect", bg="#dc2626")
@@ -151,7 +157,7 @@ class ESP32LapTimerApp:
                     elif line:
                         formatted_data = json.loads(line)
                         self.process_daq_data(formatted_data)
-            except: break
+            except json.JSONDecodeError: pass
             time.sleep(0.01)
 
     def process_lap_timer_data(self, line):
@@ -173,8 +179,8 @@ class ESP32LapTimerApp:
     
     def process_daq_data(self, formatted_data):
         try:
-            lat = float(formatted_data.get("lat"))
-            lon = float(formatted_data.get("lon"))
+            lat = float(formatted_data.get("lat")) / 10**7
+            lon = float(formatted_data.get("lon")) / 10**7
             
             self.daq_lat = lat
             self.daq_lon = lon
@@ -183,7 +189,7 @@ class ESP32LapTimerApp:
             # Update UI
             self.root.after(0, lambda: self.daq_gps_label.config(text=f"DAQ GPS: {lat:.6f}, {lon:.6f}"))
             self.check_zones()
-        except ValueError: pass
+        except: pass
 
     def toggle_arm(self):
         # The Master Switch Logic
@@ -257,14 +263,14 @@ class ESP32LapTimerApp:
         if self.lap_timer_has_gps_fix:
             self.start_line_lat = self.lap_timer_lat
             self.start_line_lon = self.lap_timer_lon
-            self.start_lbl.config(text=f"Start: {self.lap_timer_lat:.5f}, {self.lap_timer_lon:.5f}", fg="#4ade80")
+            self.start_lbl.config(text=f"Start: {self.start_line_lat:.5f}, {self.start_line_lon:.5f}", fg="#4ade80")
             if self.finish_line_lat: self.arm_btn.config(state=tk.NORMAL)
 
     def set_finish(self):
         if self.lap_timer_has_gps_fix:
             self.finish_line_lat = self.lap_timer_lat
             self.finish_line_lon = self.lap_timer_lon
-            self.finish_lbl.config(text=f"Finish: {self.lap_timer_lat:.5f}, {self.lap_timer_lon:.5f}", fg="#ef4444")
+            self.finish_lbl.config(text=f"Finish: {self.finish_line_lat:.5f}, {self.finish_line_lon:.5f}", fg="#ef4444")
             if self.start_line_lat: self.arm_btn.config(state=tk.NORMAL)
 
     def update_timer_loop(self):

@@ -42,7 +42,7 @@ void init_i2c(void)
 void init_xbee_uart(void)
 {
     const uart_config_t uart_config = {
-        .baud_rate = 9600,
+        .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
