@@ -5,6 +5,7 @@ import serial.tools.list_ports
 import threading
 import time
 import math
+import json
 
 class ESP32LapTimerApp:
     def __init__(self, root):
@@ -13,10 +14,15 @@ class ESP32LapTimerApp:
         self.root.geometry("600x850")
         self.root.configure(bg="#1e293b")
         
-        # GPS Data
-        self.current_lat = 0.0
-        self.current_lon = 0.0
-        self.has_gps_fix = False
+        # Lap Timer GPS Data
+        self.lap_timer_lat = 0.0
+        self.lap_timer_lon = 0.0
+        self.lap_timer_has_gps_fix = False
+
+        # DAQ GPS Data
+        self.daq_lat = 0.0
+        self.daq_lon = 0.0
+        self.daq_has_gps_fix = False
         
         # Trigger Zones
         self.start_line_lat = None
@@ -86,9 +92,13 @@ class ESP32LapTimerApp:
         setup_frame = tk.LabelFrame(self.root, text="Track Setup", bg="#1e293b", fg="white", padx=10, pady=10)
         setup_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        # GPS Live View
-        self.gps_label = tk.Label(setup_frame, text="Current GPS: Waiting...", font=("Courier New", 12), fg="#fbbf24", bg="#1e293b")
-        self.gps_label.pack(anchor=tk.W)
+        # Lap Timer GPS Live View
+        self.lap_timer_gps_label = tk.Label(setup_frame, text="Lap Timer GPS: Waiting...", font=("Courier New", 12), fg="#fbbf24", bg="#1e293b")
+        self.lap_timer_gps_label.pack(anchor=tk.W)
+
+        # DAQ GPS Live View
+        self.daq_gps_label = tk.Label(setup_frame, text="DAQ GPS: Waiting...", font=("Courier New", 12), fg="#fbbf24", bg="#1e293b")
+        self.daq_gps_label.pack(anchor=tk.W)
 
         # Set Buttons
         btn_row = tk.Frame(setup_frame, bg="#1e293b")
@@ -136,11 +146,15 @@ class ESP32LapTimerApp:
             try:
                 if self.serial_port.in_waiting:
                     line = self.serial_port.readline().decode('utf-8', errors='ignore').strip()
-                    if line: self.process_data(line)
+                    if line and line.startswith("LAP_TIMER:"):
+                        self.process_lap_timer_data(line[len("LAP_TIMER:"):])
+                    elif line:
+                        formatted_data = json.loads(line)
+                        self.process_daq_data(formatted_data)
             except: break
             time.sleep(0.01)
 
-    def process_data(self, line):
+    def process_lap_timer_data(self, line):
         try:
             # Expected format: "30.123456,-97.123456"
             parts = line.split(',')
@@ -148,13 +162,27 @@ class ESP32LapTimerApp:
                 lat = float(parts[0])
                 lon = float(parts[1])
                 
-                self.current_lat = lat
-                self.current_lon = lon
-                self.has_gps_fix = True
+                self.lap_timer_lat = lat
+                self.lap_timer_lon = lon
+                self.lap_timer_has_gps_fix = True
                 
                 # Update UI
-                self.root.after(0, lambda: self.gps_label.config(text=f"Current GPS: {lat:.6f}, {lon:.6f}"))
+                self.root.after(0, lambda: self.lap_timer_gps_label.config(text=f"Lap Timer GPS: {lat:.6f}, {lon:.6f}"))
                 self.check_zones()
+        except ValueError: pass
+    
+    def process_daq_data(self, formatted_data):
+        try:
+            lat = float(formatted_data.get("lat"))
+            lon = float(formatted_data.get("lon"))
+            
+            self.daq_lat = lat
+            self.daq_lon = lon
+            self.daq_has_gps_fix = True
+            
+            # Update UI
+            self.root.after(0, lambda: self.daq_gps_label.config(text=f"DAQ GPS: {lat:.6f}, {lon:.6f}"))
+            self.check_zones()
         except ValueError: pass
 
     def toggle_arm(self):
@@ -187,13 +215,13 @@ class ESP32LapTimerApp:
 
         # 3. Check Start Line (Only if timer is stopped)
         if not self.is_running:
-            dist = self.haversine(self.current_lat, self.current_lon, self.start_line_lat, self.start_line_lon)
+            dist = self.haversine(self.daq_lat, self.daq_lon, self.start_line_lat, self.start_line_lon)
             if dist <= self.trigger_radius:
                 self.start_timer()
 
         # 4. Check Finish Line (Only if timer is running)
         else:
-            dist = self.haversine(self.current_lat, self.current_lon, self.finish_line_lat, self.finish_line_lon)
+            dist = self.haversine(self.daq_lat, self.daq_lon, self.finish_line_lat, self.finish_line_lon)
             if dist <= self.trigger_radius:
                 self.stop_timer()
 
@@ -226,17 +254,17 @@ class ESP32LapTimerApp:
              self.arm_btn.config(state=tk.NORMAL)
 
     def set_start(self):
-        if self.has_gps_fix:
-            self.start_line_lat = self.current_lat
-            self.start_line_lon = self.current_lon
-            self.start_lbl.config(text=f"Start: {self.current_lat:.5f}, {self.current_lon:.5f}", fg="#4ade80")
+        if self.lap_timer_has_gps_fix:
+            self.start_line_lat = self.lap_timer_lat
+            self.start_line_lon = self.lap_timer_lon
+            self.start_lbl.config(text=f"Start: {self.lap_timer_lat:.5f}, {self.lap_timer_lon:.5f}", fg="#4ade80")
             if self.finish_line_lat: self.arm_btn.config(state=tk.NORMAL)
 
     def set_finish(self):
-        if self.has_gps_fix:
-            self.finish_line_lat = self.current_lat
-            self.finish_line_lon = self.current_lon
-            self.finish_lbl.config(text=f"Finish: {self.current_lat:.5f}, {self.current_lon:.5f}", fg="#ef4444")
+        if self.lap_timer_has_gps_fix:
+            self.finish_line_lat = self.lap_timer_lat
+            self.finish_line_lon = self.lap_timer_lon
+            self.finish_lbl.config(text=f"Finish: {self.lap_timer_lat:.5f}, {self.lap_timer_lon:.5f}", fg="#ef4444")
             if self.start_line_lat: self.arm_btn.config(state=tk.NORMAL)
 
     def update_timer_loop(self):

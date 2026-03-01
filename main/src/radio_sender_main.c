@@ -22,6 +22,8 @@
 #define UART_PORT UART_NUM_1
 #define RX_BUF_SIZE 1024
 
+#define HEADER "LAP_TIMER:"
+
 void init_i2c(void)
 {
     i2c_config_t i2c_config = {
@@ -134,7 +136,7 @@ void app_main(void)
                                          latitude, longitude, minmea_tofloat(&frame.speed));
 
                                 char tx_buffer[64];
-                                int len = sprintf(tx_buffer, "%f,%f\n", latitude, longitude);
+                                int len = sprintf(tx_buffer, "%s %f,%f\n", HEADER, latitude, longitude);
 
                                 int n = uart_write_bytes(UART_PORT, tx_buffer, len);
                                 ESP_LOGI("UART", "Sent %d bytes: %s", n, tx_buffer);
