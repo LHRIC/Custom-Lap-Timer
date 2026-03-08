@@ -127,16 +127,16 @@ void app_main(void)
                         struct minmea_sentence_rmc frame;
                         if (minmea_parse_rmc(&frame, line))
                         {
-                            float latitude = minmea_tocoord(&frame.latitude);
-                            float longitude = minmea_tocoord(&frame.longitude);
+                            double latitude = minmea_tocoord_double(&frame.latitude);
+                            double longitude = minmea_tocoord_double(&frame.longitude);
 
                             if (frame.valid)
                             {
-                                ESP_LOGI("GPS", "LAT: %f, LON: %f, SPEED: %f",
-                                         latitude, longitude, minmea_tofloat(&frame.speed));
+                                ESP_LOGI("GPS", "LAT: %.9f, LON: %.9f, SPEED: %.3f",
+                                         latitude, longitude, minmea_todouble(&frame.speed));
 
                                 char tx_buffer[64];
-                                int len = sprintf(tx_buffer, "%s %f,%f\n", HEADER, latitude, longitude);
+                                int len = snprintf(tx_buffer, sizeof(tx_buffer), "%s %.9f,%.9f\n", HEADER, latitude, longitude);
 
                                 int n = uart_write_bytes(UART_PORT, tx_buffer, len);
                                 ESP_LOGI("UART", "Sent %d bytes: %s", n, tx_buffer);
