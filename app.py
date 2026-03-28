@@ -247,26 +247,26 @@ class ESP32LapTimerApp:
             parts = line.split(',')
             if len(parts) == 2:
                 lat, lon = float(parts[0]), float(parts[1])
+                
+                # 1. Update the normal Lap Timer variables (for setting gates)
                 self.lap_timer_lat, self.lap_timer_lon = lat, lon
                 self.lap_timer_has_gps_fix = True
                 self.root.after(0, lambda: self.lap_timer_gps_label.config(text=f"Lap Timer: {lat:.9f}, {lon:.9f}"))
-        except ValueError: pass
-    
-    def process_daq_data(self, formatted_data):
-        try:
-            lat = float(formatted_data.get("lat")) / 10**7
-            lon = float(formatted_data.get("lon")) / 10**7
-            self.daq_lat, self.daq_lon = lat, lon
-            self.daq_has_gps_fix = True
-            
-            # Save history for the map (Keep max 5000 points to prevent memory bloat)
-            self.path_points.append((lat, lon))
-            if len(self.path_points) > 5000:
-                self.path_points.pop(0)
                 
-            self.root.after(0, lambda: self.daq_gps_label.config(text=f"DAQ GPS: {lat:.9f}, {lon:.9f}"))
-            self.check_zones()
-        except: pass
+                # 2. TEMPORARY TEST MODE: Mirror these coordinates to simulate the DAQ Car
+                self.daq_lat, self.daq_lon = lat, lon
+                self.daq_has_gps_fix = True
+                
+                # Save history for the map
+                self.path_points.append((lat, lon))
+                if len(self.path_points) > 5000:
+                    self.path_points.pop(0)
+                    
+                self.root.after(0, lambda: self.daq_gps_label.config(text=f"DAQ GPS (Simulated): {lat:.9f}, {lon:.9f}"))
+                
+                # Run the math to see if we crossed a gate
+                self.check_zones() 
+        except ValueError: pass
 
     # --- Core Application Logic ---
     def set_point(self, point_name):
