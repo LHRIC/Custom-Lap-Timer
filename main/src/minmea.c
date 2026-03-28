@@ -178,8 +178,8 @@ bool minmea_scan(const char *sentence, const char *format, ...)
         case 'f':
         { // Fractional value with scale (struct minmea_float).
             int sign = 0;
-            int_least32_t value = -1;
-            int_least32_t scale = 0;
+            int_least64_t value = -1;
+            int_least64_t scale = 0;
 
             if (field)
             {
@@ -198,7 +198,7 @@ bool minmea_scan(const char *sentence, const char *format, ...)
                         int digit = *field - '0';
                         if (value == -1)
                             value = 0;
-                        if (value > (INT_LEAST32_MAX - digit) / 10)
+                        if (value > (INT_LEAST64_MAX - digit) / 10)
                         {
                             /* we ran out of bits, what do we do? */
                             if (scale)

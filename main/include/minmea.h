@@ -44,8 +44,8 @@ extern "C"
 
     struct minmea_float
     {
-        int_least32_t value;
-        int_least32_t scale;
+        int_least64_t value;
+        int_least64_t scale;
     };
 
     struct minmea_date
@@ -339,6 +339,34 @@ extern "C"
         int_least32_t degrees = f->value / (f->scale * 100);
         int_least32_t minutes = f->value % (f->scale * 100);
         return (float)degrees + (float)minutes / (60 * f->scale);
+    }
+
+    /**
+     * Convert a fixed-point value to a floating-point value.
+     * Returns NaN for "unknown" values.
+     */
+    static inline float minmea_todouble(const struct minmea_float *f)
+    {
+        if (f->scale == 0)
+            return NAN;
+        return (double)f->value / (double)f->scale;
+    }
+
+    /**
+     * Convert a raw coordinate to a floating point DD.DDD... value.
+     * Returns NaN for "unknown" values.
+     */
+    static inline float minmea_tocoord_double(const struct minmea_float *f)
+    {
+        if (f->scale == 0)
+            return NAN;
+        if (f->scale > (INT_LEAST64_MAX / 100))
+            return NAN;
+        if (f->scale < (INT_LEAST64_MIN / 100))
+            return NAN;
+        int_least64_t degrees = f->value / (f->scale * 100);
+        int_least64_t minutes = f->value % (f->scale * 100);
+        return (double)degrees + (double)minutes / (60 * f->scale);
     }
 
     /**
